@@ -1,0 +1,73 @@
+# macOS and local editor state
+.DS_Store
+**/.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python caches and local builds
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.matplotlib_cache/
+
+# Local environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# Secrets and credentials
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+token.json
+secrets.*
+
+# Notebook/runtime artifacts
+*.log
+logs/
+runs/
+outputs/
+artifacts/
+wandb/
+mlruns/
+
+# Model checkpoints and generated weights
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.joblib
+*.pkl
+
+# Local data and research-source artifacts
+data/
+raw_data/
+processed_data/
+private_data/
+dec_ingestion/
+*.pdf
+
+# Large generated media
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.gif
+*.mp4
+*.mov
+*.avi
