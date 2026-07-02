@@ -15,8 +15,14 @@ The notebooks are written as a step-by-step learning artifact: the markdown inte
 - `dec_model.py`  
   Reusable PyTorch implementation of the DEC components used by both notebooks.
 
+- `dec_visualization.py`
+  Visualization helpers for t-SNE diagnostics, kept separate from the modeling code.
+
 - `latent_space_tools.py`  
   Helper methods for the latent-space notebook: digits preprocessing, clustering evaluation, latent-dimension scoring, cluster profiles, and ablation tests.
+
+- `tests/`
+  Minimal tests for deterministic helper logic and DEC input validation.
 
 - `environment.yml`  
   Conda environment definition for reproducing the notebooks.
@@ -43,6 +49,14 @@ jupyter lab
 2. Run `02_dec_latent_space_diagnostics.ipynb` for the portfolio-ready latent-space interpretation workflow.
 
 The latent-space notebook is self-contained and can be run independently.
+
+## Tests
+
+Run the lightweight test suite with:
+
+```bash
+pytest
+```
 
 ## Privacy and Repository Hygiene
 

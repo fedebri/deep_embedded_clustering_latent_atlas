@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
@@ -16,6 +18,16 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
 
 from dec_model import compute_soft_assignments
+
+
+@dataclass(frozen=True)
+class ClusteringStageDetails:
+    """Evaluation details for one clustering stage."""
+
+    matched_accuracy: float
+    cluster_to_label: dict[int, int]
+    aligned_labels: np.ndarray
+    confusion_matrix: np.ndarray
 
 
 def load_preprocessed_digits() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Pipeline]:
@@ -78,7 +90,7 @@ def clustering_accuracy_from_labels(
 def compare_clustering_stages(
     y_true: np.ndarray,
     stage_to_labels: dict[str, np.ndarray],
-) -> tuple[pd.DataFrame, dict[str, dict[str, object]]]:
+) -> tuple[pd.DataFrame, dict[str, ClusteringStageDetails]]:
     """
     Build a compact metrics table for multiple clustering stages.
 
@@ -103,12 +115,12 @@ def compare_clustering_stages(
             }
         )
 
-        details[stage_name] = {
-            "matched_accuracy": matched_accuracy,
-            "cluster_to_label": cluster_to_label,
-            "aligned_labels": aligned_labels,
-            "confusion_matrix": cm,
-        }
+        details[stage_name] = ClusteringStageDetails(
+            matched_accuracy=matched_accuracy,
+            cluster_to_label=cluster_to_label,
+            aligned_labels=aligned_labels,
+            confusion_matrix=cm,
+        )
 
     return pd.DataFrame(rows), details
 
@@ -264,6 +276,7 @@ __all__ = [
     "build_cluster_profile",
     "build_latent_feature_table",
     "clustering_accuracy_from_labels",
+    "ClusteringStageDetails",
     "compare_clustering_stages",
     "evaluate_latent_subset",
     "evaluate_latent_subsets",

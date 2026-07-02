@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from numbers import Integral, Real
 from typing import Iterable
 
 # Keep native numerical libraries conservative by default. This matters in
@@ -17,9 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from matplotlib import pyplot as plt
 from sklearn.cluster import KMeans
-from sklearn.manifold import TSNE
 from torch.utils.data import DataLoader, TensorDataset
 
 
@@ -30,6 +29,51 @@ BATCH_SIZE = 256
 PRETRAIN_EPOCHS = 10
 FINETUNE_EPOCHS = 20
 LEARNING_RATE = 1e-3
+
+
+def _as_2d_finite_array(name: str, value: np.ndarray) -> np.ndarray:
+    """Validate an array that represents samples by features."""
+    array = np.asarray(value)
+    if array.ndim != 2:
+        raise ValueError(f"{name} must be a 2D array; received shape {array.shape}.")
+    if array.shape[0] == 0 or array.shape[1] == 0:
+        raise ValueError(
+            f"{name} must be non-empty in both dimensions; received shape {array.shape}."
+        )
+    if not np.isfinite(array).all():
+        raise ValueError(f"{name} must contain only finite numeric values.")
+    return array
+
+
+def _validate_positive_int(name: str, value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer; received {value!r}.")
+
+
+def _validate_positive_float(name: str, value: float) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Real)
+        or not np.isfinite(float(value))
+        or value <= 0
+    ):
+        raise ValueError(f"{name} must be a positive finite value; received {value!r}.")
+
+
+def _validate_layer_dims(layer_dims: Iterable[int]) -> list[int]:
+    try:
+        dims = list(layer_dims)
+    except TypeError as exc:
+        raise ValueError("layer_dims must be an iterable of positive integers.") from exc
+
+    if len(dims) == 0:
+        raise ValueError("layer_dims must contain at least one hidden/latent dimension.")
+    if any(
+        isinstance(dim, bool) or not isinstance(dim, Integral) or dim <= 0
+        for dim in dims
+    ):
+        raise ValueError(f"layer_dims must contain only positive integers; received {dims!r}.")
+    return [int(dim) for dim in dims]
 
 
 # ---- 1. Basic Denoising Autoencoder ----------------------------------------
@@ -207,8 +251,16 @@ def pretrain_autoencoder(
     Output:
         encoder: Encoder that maps X to Z (latent space)
     """
+    X = _as_2d_finite_array("X", X)
+    _validate_positive_int("batch_size", batch_size)
+    _validate_positive_int("pretrain_epochs", pretrain_epochs)
+    _validate_positive_int("finetune_epochs", finetune_epochs)
+    _validate_positive_float("lr", lr)
+    if noise_std < 0 or not np.isfinite(noise_std):
+        raise ValueError(f"noise_std must be a non-negative finite value; received {noise_std!r}.")
+
     device = torch.device(device)
-    layer_dims = [int(dim) for dim in layer_dims]
+    layer_dims = _validate_layer_dims(layer_dims)
 
     print("\nStarting Autoencoder Pretraining")
     print(f"Initial input shape: {X.shape}")
@@ -318,6 +370,9 @@ def encode_dataset(
     device: torch.device | str = DEVICE,
 ) -> np.ndarray:
     """Transforms raw data X into latent features Z in batches."""
+    X = _as_2d_finite_array("X", X)
+    _validate_positive_int("batch_size", batch_size)
+
     device = torch.device(device)
     encoder.eval()
 
@@ -348,6 +403,12 @@ def initialize_clusters(
         mu: cluster centroids in latent space, shape (k, latent_dim)
         cluster_labels: hard KMeans labels, shape (n_samples,)
     """
+    _as_2d_finite_array("X", X)
+    _validate_positive_int("k", k)
+    _validate_positive_int("batch_size", batch_size)
+    if k > len(X):
+        raise ValueError(f"k must be <= number of samples; received k={k}, n_samples={len(X)}.")
+
     print("\nRunning KMeans clustering on latent features...")
     Z = encode_dataset(encoder, X, batch_size=batch_size, device=device)
 
@@ -369,6 +430,15 @@ def compute_soft_assignments(Z: np.ndarray, mu: np.ndarray, alpha: float = 1.0) 
     Q[i, j] is interpreted as the probability of assigning sample i to cluster j.
     Each row is normalized so that the probabilities across clusters sum to 1.
     """
+    Z = _as_2d_finite_array("Z", Z)
+    mu = _as_2d_finite_array("mu", mu)
+    _validate_positive_float("alpha", alpha)
+    if Z.shape[1] != mu.shape[1]:
+        raise ValueError(
+            "Z and mu must have the same latent dimension; "
+            f"received Z.shape={Z.shape}, mu.shape={mu.shape}."
+        )
+
     print("\nComputing soft assignments Q using Student's t-distribution...")
 
     squared_dist = np.sum((Z[:, np.newaxis, :] - mu[np.newaxis, :, :]) ** 2, axis=2)
@@ -393,6 +463,12 @@ def compute_target_distribution(Q: np.ndarray) -> np.ndarray:
     DEC sharpens confident assignments by squaring Q, then compensates for
     cluster frequency so very large clusters do not dominate the loss.
     """
+    Q = _as_2d_finite_array("Q", Q)
+    if np.any(Q < 0):
+        raise ValueError("Q must contain non-negative soft assignment values.")
+    if np.any(np.sum(Q, axis=1) <= 0):
+        raise ValueError("Each row of Q must have positive probability mass.")
+
     print("\nComputing target distribution P...")
 
     eps = 1e-8
@@ -418,6 +494,15 @@ def kl_loss(P: torch.Tensor, Q: torch.Tensor) -> torch.Tensor:
     P is the target distribution and Q is the current soft assignment. The small
     clamp avoids log(0), which would turn the loss into inf or nan.
     """
+    if P.shape != Q.shape:
+        raise ValueError(f"P and Q must have the same shape; received {P.shape} and {Q.shape}.")
+    if P.ndim != 2:
+        raise ValueError(f"P and Q must be 2D tensors; received shape {P.shape}.")
+    if not torch.isfinite(P).all() or not torch.isfinite(Q).all():
+        raise ValueError("P and Q must contain only finite values.")
+    if torch.any(P < 0) or torch.any(Q < 0):
+        raise ValueError("P and Q must contain non-negative probability values.")
+
     P = P.clamp(min=1e-8)
     Q = Q.clamp(min=1e-8)
     loss = torch.sum(P * torch.log(P / Q), dim=1)
@@ -475,6 +560,21 @@ def train_DEC(
     update_interval epochs, while Q is recomputed for each mini-batch so the
     gradient can update both the encoder parameters and the centroids.
     """
+    X = _as_2d_finite_array("X", X)
+    mu = _as_2d_finite_array("mu", mu)
+    if mu.shape[0] > len(X):
+        raise ValueError(
+            "mu cannot contain more centroids than there are samples; "
+            f"received n_centroids={mu.shape[0]}, n_samples={len(X)}."
+        )
+    _validate_positive_int("batch_size", batch_size)
+    _validate_positive_int("max_epochs", max_epochs)
+    _validate_positive_int("update_interval", update_interval)
+    _validate_positive_float("lr", lr)
+    _validate_positive_float("alpha", alpha)
+    if tol is not None and (tol < 0 or not np.isfinite(tol)):
+        raise ValueError(f"tol must be None or a non-negative finite value; received {tol!r}.")
+
     device = torch.device(device)
     encoder.to(device)
     encoder.train()
@@ -552,57 +652,6 @@ def train_DEC(
     )
 
 
-def plot_tsne(
-    Z: np.ndarray,
-    labels: np.ndarray | None = None,
-    title: str = "t-SNE of Latent Space",
-) -> None:
-    """Plots a 2D t-SNE visualization of latent representations Z."""
-    print("\nRunning t-SNE...")
-    tsne = TSNE(n_components=2, perplexity=30, init="random", random_state=42)
-    Z_2d = tsne.fit_transform(Z)
-
-    print("t-SNE completed. Plotting...")
-
-    plt.figure(figsize=(8, 6))
-    if labels is not None:
-        plt.scatter(Z_2d[:, 0], Z_2d[:, 1], c=labels, cmap="tab10", s=5, alpha=0.7)
-        plt.colorbar()
-    else:
-        plt.scatter(Z_2d[:, 0], Z_2d[:, 1], s=5, alpha=0.7)
-
-    plt.title(title)
-    plt.xlabel("t-SNE Dim 1")
-    plt.ylabel("t-SNE Dim 2")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_final_tsne(
-    encoder: nn.Module,
-    X: np.ndarray,
-    title: str = "Final DEC Embeddings (t-SNE)",
-    batch_size: int = BATCH_SIZE,
-    device: torch.device | str = DEVICE,
-) -> np.ndarray:
-    """Encodes X with the fine-tuned encoder, plots t-SNE, and returns Z."""
-    Z = encode_dataset(encoder, X, batch_size=batch_size, device=device)
-
-    print("Running t-SNE on final embeddings...")
-    Z_tsne = TSNE(n_components=2, perplexity=30, init="random", random_state=42).fit_transform(Z)
-
-    plt.figure(figsize=(8, 6))
-    plt.scatter(Z_tsne[:, 0], Z_tsne[:, 1], s=4, alpha=0.7)
-    plt.title(title)
-    plt.xlabel("t-SNE Dim 1")
-    plt.ylabel("t-SNE Dim 2")
-    plt.grid(True)
-    plt.show()
-
-    return Z
-
-
 __all__ = [
     "BATCH_SIZE",
     "DECTrainingResult",
@@ -613,14 +662,11 @@ __all__ = [
     "FullAutoencoder",
     "LEARNING_RATE",
     "PRETRAIN_EPOCHS",
-    "StackedEncoder",
     "compute_soft_assignments",
     "compute_target_distribution",
     "encode_dataset",
     "initialize_clusters",
     "kl_loss",
-    "plot_final_tsne",
-    "plot_tsne",
     "pretrain_autoencoder",
     "train_DEC",
 ]
