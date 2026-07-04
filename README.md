@@ -58,24 +58,10 @@ Run the lightweight test suite with:
 pytest
 ```
 
-## Privacy and Repository Hygiene
-
-The `.gitignore` is intentionally conservative. It excludes local model checkpoints, notebook checkpoints, raw/preprocessed paper extraction artifacts, PDFs, caches, local environment files, and credentials.
-
-Before pushing to GitHub, check what will be committed:
-
-```bash
-git status --short
-git add --dry-run .
-```
-
-If you want notebooks to render with outputs on GitHub, review the outputs first to make sure they do not contain private paths, data, or large embedded images.
-
 ## Notes
 
 - The digits example uses `sklearn.datasets.load_digits`, so it runs offline.
 - UMAP is optional. The notebooks use PCA by default for stable visualization because UMAP can crash some notebook kernels through native OpenMP/numba interactions.
-- The paper PDF and extracted paper assets are treated as local research materials and are ignored by default.
 
 ## License
 
