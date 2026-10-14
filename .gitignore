@@ -54,6 +54,7 @@ mlruns/
 *.pkl
 
 # Local data and research-source artifacts
+/archive/
 data/
 raw_data/
 processed_data/
